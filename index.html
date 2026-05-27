@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>Kağıt Bebek AI Studio v2.1</title>
+    <title>Kağıt Bebek AI Studio v2.2</title>
     <style>
         * {
             box-sizing: border-box;
@@ -59,10 +59,9 @@
             text-align: center;
             margin: 0 15px;
         }
-        /* Kontrol Paneli - Alt boşluğu telefonlar için maksimuma çıkardık */
         .controls {
             background: #1e1e1e;
-            padding: 15px 20px 60px 20px; /* Alt boşluk 60px yapıldı, sürgüler yukarı kalktı */
+            padding: 15px 20px 60px 20px;
             z-index: 5;
             border-top: 1px solid #333;
             color: white;
@@ -129,13 +128,13 @@
 
     <div class="controls">
         <div class="title-area">
-            <div class="title">KAĞIT BEBEK AI v2.1</div>
+            <div class="title">KAĞIT BEBEK AI v2.2</div>
             <button class="btn-action" id="actionBtn">FOTOĞRAF ÇEK</button>
         </div>
         
         <div class="control-group">
             <label>AI Hassasiyet</label>
-            <input type="range" id="tolerance" min="15" max="90" step="1" value="40">
+            <input type="range" id="tolerance" min="10" max="120" step="1" value="45">
         </div>
         <div class="control-group">
             <label>Parlaklık</label>
@@ -150,7 +149,6 @@
             <input type="range" id="retro" min="0" max="1" step="0.1" value="0">
         </div>
     </div>
-
     <script>
         const video = document.getElementById('camera');
         const canvas = document.getElementById('paintCanvas');
@@ -173,7 +171,7 @@
                 });
                 video.srcObject = stream;
             } catch (err) {
-                toast.innerText = "Kamera Başlatılamadı! Lütfen HTTPS bağlantısını kontrol edin.";
+                toast.innerText = "Kamera Başlatılamadı!";
             }
         }
 
@@ -181,52 +179,61 @@
             if (!isPhotoTaken) return;
 
             const rect = canvas.getBoundingClientRect();
-            
-            // Ekrandaki dokunma noktasını canvasın gerçek piksel boyutuna oranlama
             const clickX = Math.floor((clientX - rect.left) * (canvas.width / rect.width));
             const clickY = Math.floor((clientY - rect.top) * (canvas.height / rect.height));
 
             const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
             const data = imgData.data;
+            const width = canvas.width;
+            const height = canvas.height;
             
-            const targetIdx = (clickY * canvas.width + clickX) * 4;
+            const targetIdx = (clickY * width + clickX) * 4;
             const targetR = data[targetIdx];
             const targetG = data[targetIdx + 1];
             const targetB = data[targetIdx + 2];
 
             const tolerance = parseInt(toleranceInput.value);
-            const visited = new Uint8Array(canvas.width * canvas.height);
-            const queue = [[clickX, clickY]];
+            const visited = new Uint8Array(width * height);
             
-            while(queue.length > 0) {
-                const [x, y] = queue.shift();
-                if(x < 0 || x >= canvas.width || y < 0 || y >= canvas.height) continue;
+            const queue = [clickX, clickY];
+            let head = 0;
+
+            while (head < queue.length) {
+                const x = queue[head++];
+                const y = queue[head++];
+
+                if (x < 0 || x >= width || y < 0 || y >= height) continue;
                 
-                const idx = (y * canvas.width + x) * 4;
-                if(visited[y * canvas.width + x]) continue;
-                visited[y * canvas.width + x] = 1;
+                const pos = y * width + x;
+                if (visited[pos]) continue;
+                visited[pos] = 1;
 
+                const idx = pos * 4;
                 const r = data[idx];
-                const g = data[idx+1];
-                const b = data[idx+2];
+                const g = data[idx + 1];
+                const b = data[idx + 2];
 
-                const distance = Math.sqrt(
-                    Math.pow(r - targetR, 2) + 
-                    Math.pow(g - targetG, 2) + 
-                    Math.pow(b - targetB, 2)
-                );
+                const rDiff = r - targetR;
+                const gDiff = g - targetG;
+                const bDiff = b - targetB;
+                
+                const meanR = (targetR + r) / 2;
+                const distance = Math.sqrt((2 + meanR/256) * rDiff * rDiff + 4 * gDiff * gDiff + (2 + (255-meanR)/256) * bDiff * bDiff);
 
-                if(distance < tolerance) {
-                    data[idx + 3] = 0; // Pikseli sil (şeffaf yap)
-                    queue.push([x + 1, y], [x - 1, y], [x, y + 1], [x, y - 1]);
+                if (distance < tolerance) {
+                    data[idx + 3] = 0; 
+                    
+                    if (x + 1 < width && !visited[pos + 1]) queue.push(x + 1, y);
+                    if (x - 1 >= 0 && !visited[pos - 1]) queue.push(x - 1, y);
+                    if (y + 1 < height && !visited[pos + width]) queue.push(x, y + 1);
+                    if (y - 1 >= 0 && !visited[pos - width]) queue.push(x, y - 1);
                 }
             }
 
             ctx.putImageData(imgData, 0, 0);
-            toast.innerText = "Harika! Şimdi telefonu etraftaki desenlere tutarak kombini değiştir.";
+            toast.innerText = "Kombin Değiştirildi!";
         }
 
-        // Hem tıklama hem de dokunma olaylarını dinle (Mobil uyumluluk)
         canvas.addEventListener('click', (e) => handleSelection(e.clientX, e.clientY));
         canvas.addEventListener('touchstart', (e) => {
             if(e.touches.length > 0) {
@@ -236,10 +243,13 @@
 
         actionBtn.addEventListener('click', () => {
             if (!isPhotoTaken) {
-                // Ekranın o anki görünür boyutuna göre canvası ayarla
                 canvas.width = video.videoWidth || canvas.clientWidth;
                 canvas.height = video.videoHeight || canvas.clientHeight;
+                
+                ctx.filter = "blur(1px)"; 
                 ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                ctx.filter = "none"; 
+                
                 isPhotoTaken = true;
                 actionBtn.innerText = "YENİDEN ÇEK";
                 actionBtn.classList.add('btn-reset');
